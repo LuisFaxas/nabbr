@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+*.manifest
+*.spec
+
+# PyInstaller
+*.exe
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Test downloads
+TEST DOWNLOADS/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# yt-dlp cache
+.cache/
+
+# Dev Stack / AI tooling
+dev/
+.claude/
+CLAUDE.md
+scripts/
+
+# Auto-generated docs
+generate_documentation.py
+video_downloader_documentation.*
