@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Settings Manager for Web Video Downloader
+Settings Manager for Nabbr
 Handles saving and loading user preferences including last used directories.
 """
 
@@ -168,8 +168,8 @@ class SettingsManager:
     def get_window_settings(self):
         """Get window size and position settings"""
         return {
-            "width": self.settings.get("window_width", 950),
-            "height": self.settings.get("window_height", 750),
+            "width": self.settings.get("window_width", 900),
+            "height": self.settings.get("window_height", 650),
             "remember": self.settings.get("remember_window_size", True)
         }
     

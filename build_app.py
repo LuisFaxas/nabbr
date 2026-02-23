@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
 Build Script for Nabbr
-Creates a standalone executable using PyInstaller
+Creates a standalone executable using PyInstaller.
+Supports both Windows and macOS.
 """
 
 import os
@@ -9,10 +10,15 @@ import shutil
 import subprocess
 import sys
 
+
 def build_executable():
     """Build a standalone executable for Nabbr."""
 
-    print("Building Nabbr executable...")
+    is_mac = sys.platform == 'darwin'
+    path_sep = ':' if is_mac else ';'
+    app_name = 'Nabbr.app' if is_mac else 'Nabbr.exe'
+
+    print(f"Building Nabbr for {'macOS' if is_mac else 'Windows'}...")
 
     # Clean previous build directories if they exist
     for dir_name in ['build', 'dist']:
@@ -20,28 +26,35 @@ def build_executable():
             print(f"Cleaning {dir_name} directory...")
             shutil.rmtree(dir_name)
 
-    # Define icon path
-    icon_path = 'app_icon.ico'
-    if not os.path.exists(icon_path):
+    # Define icon path (platform-specific format)
+    if is_mac:
+        icon_path = 'app_icon.icns' if os.path.exists('app_icon.icns') else None
+    else:
+        icon_path = 'app_icon.ico' if os.path.exists('app_icon.ico') else None
+
+    if icon_path is None:
         print("Warning: No icon file found. The executable will use a default icon.")
-        icon_path = None
     else:
         print(f"Using icon: {icon_path}")
 
-    # Check if ffmpeg.exe exists in the project directory
-    ffmpeg_exists = os.path.exists('ffmpeg.exe')
+    # Check if ffmpeg exists in the project directory
+    ffmpeg_name = 'ffmpeg' if is_mac else 'ffmpeg.exe'
+    ffmpeg_exists = os.path.exists(ffmpeg_name)
     if not ffmpeg_exists:
-        print("Warning: ffmpeg.exe not found in the project directory.")
+        print(f"Warning: {ffmpeg_name} not found in the project directory.")
         print("The application will still build, but users will need to install FFmpeg separately.")
-        print("For full functionality, download FFmpeg and place it in the same directory as the executable.")
+        if is_mac:
+            print("Install via Homebrew: brew install ffmpeg")
+        else:
+            print("For full functionality, download FFmpeg and place it in the same directory as the executable.")
 
     # Build the PyInstaller command
     cmd = [
         'pyinstaller',
         '--name=Nabbr',
-        '--onefile',  # Create a single executable file
-        '--windowed',  # Don't show console window when running the app
-        '--clean',  # Clean PyInstaller cache
+        '--onefile',
+        '--windowed',
+        '--clean',
     ]
 
     # Add icon if available
@@ -50,15 +63,16 @@ def build_executable():
 
     # Add ffmpeg if available
     if ffmpeg_exists:
-        cmd.append('--add-data=ffmpeg.exe;.')
+        cmd.append(f'--add-data={ffmpeg_name}{path_sep}.')
 
-    # Add hidden imports that might be needed
+    # Add hidden imports
     cmd.extend([
         '--hidden-import=PyQt5',
         '--hidden-import=PyQt5.QtCore',
         '--hidden-import=PyQt5.QtGui',
         '--hidden-import=PyQt5.QtWidgets',
         '--hidden-import=yt_dlp',
+        '--hidden-import=curl_cffi',
     ])
 
     # Add the main script
@@ -70,14 +84,14 @@ def build_executable():
     subprocess.run(cmd, check=True)
 
     print("\nBuild completed!")
-    print(f"Executable created at: {os.path.abspath('dist/Nabbr.exe')}")
+    print(f"Created: {os.path.abspath('dist/' + app_name)}")
 
     # Copy additional files to the dist directory
     print("\nCopying additional files to distribution directory...")
 
     # Create a simple readme for users
     with open('dist/README.txt', 'w') as f:
-        f.write("""Nabbr
+        f.write(f"""Nabbr
 =====
 
 Download videos and audio from YouTube, Instagram, TikTok, and 1000+ sites.
@@ -89,7 +103,7 @@ Features:
 - Batch download multiple videos
 
 To use:
-1. Launch Nabbr.exe
+1. Launch {app_name}
 2. Enter a video URL
 3. Select your desired options
 4. Click Download
@@ -105,7 +119,20 @@ Note: This application requires an internet connection.
     # If ffmpeg wasn't included, create a note about it
     if not ffmpeg_exists:
         with open('dist/FFMPEG_NOTE.txt', 'w') as f:
-            f.write("""IMPORTANT: FFmpeg Required for Full Functionality
+            if is_mac:
+                f.write("""IMPORTANT: FFmpeg Required for Full Functionality
+===========================================
+
+For video conversion features to work properly, you need to install FFmpeg:
+
+1. Install via Homebrew: brew install ffmpeg
+   Or download from: https://ffmpeg.org/download.html
+
+Without FFmpeg, you can still download videos, but conversion for
+Adobe Premiere Pro and DaVinci Resolve will not work.
+""")
+            else:
+                f.write("""IMPORTANT: FFmpeg Required for Full Functionality
 ===========================================
 
 For video conversion features to work properly, you need to install FFmpeg:

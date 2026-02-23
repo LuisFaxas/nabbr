@@ -618,7 +618,7 @@ class MainWindow(QMainWindow):
     def export_settings(self):
         """Export settings to a file"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export Settings", "video_downloader_settings.json", "JSON Files (*.json)"
+            self, "Export Settings", "nabbr_settings.json", "JSON Files (*.json)"
         )
         if file_path:
             if self.settings.export_settings(file_path):

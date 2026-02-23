@@ -23,7 +23,7 @@ def run_command(command, description):
         return False
 
 def main():
-    print("🚀 YouTube Downloader Fix Script")
+    print("🚀 Nabbr - yt-dlp Update Script")
     print("=" * 50)
     
     # Step 1: Update yt-dlp

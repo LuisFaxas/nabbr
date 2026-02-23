@@ -46,6 +46,7 @@ dev/
 .claude/
 CLAUDE.md
 scripts/
+icons/
 
 # Auto-generated docs
 generate_documentation.py

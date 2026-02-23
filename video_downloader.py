@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Web Video Downloader - A simple wrapper for yt-dlp
+Nabbr - A simple wrapper for yt-dlp
 This script provides an easy-to-use interface for downloading videos from various websites.
 """
 
@@ -18,12 +18,18 @@ def _find_ffmpeg():
     found = shutil.which("ffmpeg")
     if found:
         return found
-    # Try common Windows locations as fallback
-    possible_paths = [
-        "ffmpeg.exe",
-        r"C:\ffmpeg\bin\ffmpeg.exe",
-        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
-    ]
+    # Try common platform-specific locations as fallback
+    if sys.platform == 'darwin':
+        possible_paths = [
+            "/usr/local/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg",
+        ]
+    else:
+        possible_paths = [
+            "ffmpeg.exe",
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe",
+        ]
     for path in possible_paths:
         if os.path.exists(path):
             return path
@@ -133,7 +139,7 @@ def convert_for_davinci(input_file, output_dir):
             "-movflags", "+faststart",
             "-avoid_negative_ts", "make_zero",
             "-fflags", "+genpts",
-            "-vsync", "cfr",  # Constant frame rate for timeline compatibility
+            "-fps_mode", "cfr",  # Constant frame rate for timeline compatibility
             output_file
         ]
         
