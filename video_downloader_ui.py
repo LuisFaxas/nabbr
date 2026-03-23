@@ -6,6 +6,41 @@ A desktop video and audio downloader.
 
 import sys
 import os
+import logging
+from pathlib import Path
+
+# --- Logging setup: capture ALL output to a log file ---
+# In windowed mode (PyInstaller --windowed), stdout/stderr go nowhere.
+# This redirects everything to a log file so errors are never lost.
+_log_dir = Path.home() / ".nabbr"
+_log_dir.mkdir(exist_ok=True)
+_log_file = _log_dir / "nabbr.log"
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(str(_log_file), encoding="utf-8"),
+    ],
+)
+logger = logging.getLogger("nabbr")
+
+# Redirect stdout/stderr to log file so print() calls from yt-dlp/video_downloader are captured
+class _LogWriter:
+    def __init__(self, log_level):
+        self._level = log_level
+        self._buf = ""
+    def write(self, msg):
+        if msg and msg.strip():
+            for line in msg.rstrip().splitlines():
+                logging.log(self._level, line)
+    def flush(self):
+        pass
+
+if getattr(sys, 'frozen', False):
+    sys.stdout = _LogWriter(logging.INFO)
+    sys.stderr = _LogWriter(logging.ERROR)
+
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QLabel, QLineEdit, QPushButton,
                              QComboBox, QCheckBox, QProgressBar, QFileDialog,
@@ -103,6 +138,25 @@ class DownloaderThread(QThread):
     def request_stop(self):
         """Request graceful stop. The progress hook will raise DownloadCancelled."""
         self._stop_requested = True
+
+    def _get_recent_error(self):
+        """Read the last few lines of the log file to find the actual error."""
+        try:
+            log_path = Path.home() / ".nabbr" / "nabbr.log"
+            if log_path.exists():
+                lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+                # Find the last ERROR line or last few lines
+                error_lines = [l for l in lines[-30:] if "ERROR" in l or "error" in l.lower() or "failed" in l.lower()]
+                if error_lines:
+                    # Return the last meaningful error, stripped of timestamp
+                    last = error_lines[-1]
+                    # Strip timestamp prefix if present
+                    if "] " in last:
+                        last = last.split("] ", 1)[-1]
+                    return last[:200]  # Truncate for UI display
+        except Exception:
+            pass
+        return "Check log file at ~/.nabbr/nabbr.log for details"
     
     def run(self):
         try:
@@ -134,54 +188,31 @@ class DownloaderThread(QThread):
                 if self.output_path:
                     # Look for any video/audio files that might have been downloaded
                     if self.options.get('audio_only'):
-                        # For audio downloads, prioritize audio formats
                         file_extensions = ['*.mp3', '*.m4a', '*.aac', '*.opus']
                     else:
-                        # For video downloads, prioritize video formats
                         file_extensions = ['*.mp4', '*.mkv', '*.webm', '*.mov', '*.avi']
-                    
+
                     found_files = []
-                    
                     for ext in file_extensions:
                         files = glob.glob(f"{self.output_path}/{ext}")
                         found_files.extend(files)
-                    
+
                     if found_files:
-                        # Sort by creation time to find the most recent file
                         latest_file = max(found_files, key=os.path.getctime)
                         file_name = os.path.basename(latest_file)
-                        
-                        # Update status based on file type
-                        if self.options.get('audio_only'):
-                            if file_name.lower().endswith('.mp3'):
-                                self.status.emit(f"🎵 Success! MP3 audio extracted: {file_name}")
-                            elif file_name.lower().endswith(('.m4a', '.aac', '.opus')):
-                                self.status.emit(f"🎵 Audio downloaded: {file_name}")
-                            else:
-                                self.status.emit(f"📁 File downloaded: {file_name}")
-                        else:
-                            if self.options.get('davinci') and '_davinci' in file_name:
-                                self.status.emit(f"🎬 DaVinci-ready video: {file_name}")
-                            elif self.options.get('premiere') and '_premiere' in file_name:
-                                self.status.emit(f"🎬 Premiere-ready video: {file_name}")
-                            else:
-                                self.status.emit(f"📹 Video downloaded: {file_name}")
-                        
-                        # Make sure progress is at 100% when done
                         self.progress.emit(100)
-                        self.finished_signal.emit(True, f"Download completed successfully: {file_name}")
+                        self.finished_signal.emit(True, f"Download completed: {file_name}")
                     else:
-                        # No files found, might be an error
                         self.progress.emit(0)
                         self.finished_signal.emit(False, "No files were downloaded. Check the URL and try again.")
                 else:
-                    # No output path specified, assume success
                     self.progress.emit(100)
                     self.finished_signal.emit(True, "Download completed successfully!")
             else:
-                # Download failed
                 self.progress.emit(0)
-                self.finished_signal.emit(False, "Download failed. Please check the URL and try again.")
+                # Read the log file tail for the actual error
+                error_detail = self._get_recent_error()
+                self.finished_signal.emit(False, f"Download failed: {error_detail}")
                 
         except DownloadCancelled:
             self.progress.emit(0)

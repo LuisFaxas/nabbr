@@ -13,6 +13,12 @@ import glob
 from pathlib import Path
 
 
+# On Windows, prevent subprocess calls from spawning visible console windows
+_subprocess_flags = {}
+if sys.platform == 'win32':
+    _subprocess_flags['creationflags'] = subprocess.CREATE_NO_WINDOW
+
+
 def _setup_bundled_paths():
     """When running as a PyInstaller bundle, add the bundle dir to PATH
     so yt-dlp can find deno (JS runtime) and ffmpeg."""
@@ -28,17 +34,38 @@ _setup_bundled_paths()
 
 
 def _find_deno():
-    """Find the deno binary path (JS runtime required by yt-dlp for YouTube)."""
+    """Find the deno binary path (JS runtime required by yt-dlp for YouTube).
+    Verifies the binary can actually execute (Windows Defender may block it)."""
     deno_name = 'deno.exe' if sys.platform == 'win32' else 'deno'
+    candidates = []
+
     if getattr(sys, 'frozen', False):
         bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
         for d in [bundle_dir, os.path.dirname(sys.executable)]:
             p = os.path.join(d, deno_name)
             if os.path.exists(p):
-                return p
-    found = shutil.which('deno')
-    if found:
-        return found
+                candidates.append(p)
+
+    system_deno = shutil.which('deno')
+    if system_deno:
+        candidates.append(system_deno)
+
+    # Verify each candidate can actually run (Defender may block bundled exe)
+    for path in candidates:
+        try:
+            result = subprocess.run(
+                [path, '--version'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=5, **_subprocess_flags,
+            )
+            if result.returncode == 0:
+                print(f"Deno verified OK: {path}")
+                return path
+        except Exception as e:
+            print(f"Deno at {path} failed verification: {e}")
+            continue
+
+    print("Warning: No working deno found — YouTube downloads may fail")
     return None
 
 
@@ -118,7 +145,7 @@ def convert_for_premiere(input_file, output_dir):
         print(f"Converting video for Premiere Pro compatibility...")
         print(f"Running command: {' '.join(command)}")
         
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **_subprocess_flags)
         
         if result.returncode == 0:
             print(f"Conversion completed successfully!")
@@ -187,7 +214,7 @@ def convert_for_davinci(input_file, output_dir):
         print(f"Converting video for DaVinci Resolve compatibility...")
         print(f"Running command: {' '.join(command)}")
         
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **_subprocess_flags)
         
         if result.returncode == 0:
             print(f"DaVinci conversion completed successfully!")
@@ -254,17 +281,17 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
         try:
             import curl_cffi  # Optional dependency for impersonation
             supports_impersonate = True
-        except Exception:
+            print(f"curl_cffi loaded OK (version: {getattr(curl_cffi, '__version__', 'unknown')})")
+        except Exception as e:
+            print(f"curl_cffi not available: {e} — downloads will work but without browser impersonation")
             supports_impersonate = False
-        
+
         # Set up yt-dlp options with minimal, proven configuration
         ydl_opts = {
             'quiet': False,
             'no_warnings': False,
             'ignoreerrors': False,
-            # Force single video download, not playlist
             'noplaylist': True,
-            # Retry settings for reliability
             'retries': 3,
             'fragment_retries': 3,
         }
@@ -275,14 +302,18 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
         deno_path = _find_deno()
         if deno_path:
             ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
-            print(f"Using deno JS runtime: {deno_path}")
         else:
-            print("Warning: deno not found — YouTube downloads may fail")
+            # No deno available — still try, yt-dlp may work without JS for some videos
+            # but YouTube will likely fail. Log prominently.
+            print("ERROR: No working deno JS runtime found!")
+            print("YouTube downloads require deno. Install from https://deno.land")
 
         # Tell yt-dlp where ffmpeg is
         ffmpeg_path = _find_ffmpeg()
         if ffmpeg_path:
-            ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
+            ffmpeg_dir = os.path.dirname(ffmpeg_path)
+            ydl_opts['ffmpeg_location'] = ffmpeg_dir
+            print(f"Using FFmpeg: {ffmpeg_path}")
         
         # Set output path
         if output_path:
