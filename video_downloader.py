@@ -19,12 +19,27 @@ def _setup_bundled_paths():
     if getattr(sys, 'frozen', False):
         bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
         exe_dir = os.path.dirname(sys.executable)
-        # Prepend both dirs to PATH so yt-dlp subprocess calls find deno/ffmpeg
+        # Prepend both dirs to PATH so subprocess calls find bundled binaries
         for d in [bundle_dir, exe_dir]:
             if d not in os.environ.get('PATH', ''):
                 os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
 
 _setup_bundled_paths()
+
+
+def _find_deno():
+    """Find the deno binary path (JS runtime required by yt-dlp for YouTube)."""
+    deno_name = 'deno.exe' if sys.platform == 'win32' else 'deno'
+    if getattr(sys, 'frozen', False):
+        bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        for d in [bundle_dir, os.path.dirname(sys.executable)]:
+            p = os.path.join(d, deno_name)
+            if os.path.exists(p):
+                return p
+    found = shutil.which('deno')
+    if found:
+        return found
+    return None
 
 
 def _find_ffmpeg():
@@ -249,15 +264,25 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
             'ignoreerrors': False,
             # Force single video download, not playlist
             'noplaylist': True,
-            # Use default client selection - let yt-dlp choose the best working client
-            # This has been proven to work in testing
             # Retry settings for reliability
             'retries': 3,
             'fragment_retries': 3,
         }
         if supports_impersonate:
-            # Impersonate a browser to bypass Cloudflare anti-bot challenges
             ydl_opts['impersonate'] = 'chrome'
+
+        # Tell yt-dlp exactly where deno is (required for YouTube)
+        deno_path = _find_deno()
+        if deno_path:
+            ydl_opts['js_runtimes'] = {'deno': {'path': deno_path}}
+            print(f"Using deno JS runtime: {deno_path}")
+        else:
+            print("Warning: deno not found — YouTube downloads may fail")
+
+        # Tell yt-dlp where ffmpeg is
+        ffmpeg_path = _find_ffmpeg()
+        if ffmpeg_path:
+            ydl_opts['ffmpeg_location'] = os.path.dirname(ffmpeg_path)
         
         # Set output path
         if output_path:
