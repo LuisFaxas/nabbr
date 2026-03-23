@@ -343,74 +343,59 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
             ydl_opts['format'] = video_format
         else:
             # Video downloads - Quality and format selection
+            # Strategy: always prefer H.264 (avc1) + AAC (m4a) so FFmpeg can
+            # just mux into MP4 instantly (stream copy) instead of re-encoding.
+            # VP9/WebM fallbacks are last resort — they require slow re-encoding.
+
+            # H.264-first format string builder
+            def _mp4_fmt(height_filter=''):
+                """Build format string preferring H.264+AAC for instant MP4 mux."""
+                hf = f'[height{height_filter}]' if height_filter else ''
+                return (
+                    # 1st: H.264 video + AAC audio (instant mux, no re-encode)
+                    f'bestvideo{hf}[vcodec^=avc1]+bestaudio[acodec^=mp4a]/'
+                    f'bestvideo{hf}[vcodec^=avc1]+bestaudio[ext=m4a]/'
+                    # 2nd: Any MP4 container video + M4A audio
+                    f'bestvideo{hf}[ext=mp4]+bestaudio[ext=m4a]/'
+                    # 3rd: Best available (may need re-encode)
+                    f'bestvideo{hf}+bestaudio/'
+                    f'best'
+                )
+
+            need_mp4 = davinci or premiere or mp4
+
             if quality:
                 if quality == "best":
-                    if davinci:
-                        ydl_opts['format'] = (
-                            'bestvideo[height>=2160][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=2160][vcodec^=avc1]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1440][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                            'best[ext=mp4]/mp4'
-                        )
-                        ydl_opts['merge_output_format'] = 'mp4'
-                    elif premiere:
-                        # Adobe Premiere Pro compatible format - prioritize 4K (accept VP9 and AVC)
-                        ydl_opts['format'] = (
-                            'bestvideo[height>=2160][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=2160][vcodec^=avc]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1440][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                            'best[ext=mp4]/mp4'
-                        )
-                        ydl_opts['merge_output_format'] = 'mp4'
-                        ydl_opts['postprocessor_args'] = {'ffmpeg': ['-c:v', 'libx264', '-c:a', 'aac', '-movflags', '+faststart']}
-                    elif mp4:
-                        # MP4 format with 4K support - prioritize highest resolution
-                        ydl_opts['format'] = (
-                            'bestvideo[height>=2160][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1440][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/'
-                            'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                            'best[ext=mp4]/mp4'
-                        )
-                        ydl_opts['merge_output_format'] = 'mp4'
+                    if need_mp4:
+                        ydl_opts['format'] = _mp4_fmt()
                     else:
-                        # Best quality with 4K support - prioritize HIGHEST resolution
-                        ydl_opts['format'] = (
-                            'bestvideo[height>=2160]+bestaudio/'
-                            'bestvideo[height>=1440]+bestaudio/'
-                            'bestvideo[height>=1080]+bestaudio/'
-                            'bestvideo+bestaudio/best'
-                        )
+                        ydl_opts['format'] = 'bestvideo+bestaudio/best'
                 elif quality == "worst":
-                    if davinci or premiere or mp4:
+                    if need_mp4:
                         ydl_opts['format'] = (
+                            'worstvideo[vcodec^=avc1]+worstaudio[ext=m4a]/'
                             'worstvideo[ext=mp4]+worstaudio[ext=m4a]/'
-                            'worst[ext=mp4]/mp4'
+                            'worstvideo+worstaudio/worst'
                         )
-                        ydl_opts['merge_output_format'] = 'mp4'
                     else:
                         ydl_opts['format'] = 'worstvideo+worstaudio/worst'
             else:
-                # Default format selection - good quality balance (prefer 1440p, fallback to others)
-                if davinci or premiere or mp4:
-                    ydl_opts['format'] = (
-                        'bestvideo[height<=1440][ext=mp4]+bestaudio[ext=m4a]/'
-                        'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/'
-                        'bestvideo[ext=mp4]+bestaudio[ext=m4a]/'
-                        'best[ext=mp4]/mp4'
-                    )
-                    ydl_opts['merge_output_format'] = 'mp4'
+                # Default: good quality balance
+                if need_mp4:
+                    ydl_opts['format'] = _mp4_fmt('<=1440')
                 else:
-                    # Default: prefer 1440p for good quality/size balance
                     ydl_opts['format'] = (
                         'bestvideo[height<=1440]+bestaudio/'
                         'bestvideo[height<=1080]+bestaudio/'
                         'bestvideo+bestaudio/best'
                     )
+
+            if need_mp4:
+                ydl_opts['merge_output_format'] = 'mp4'
+                # Tell FFmpeg to copy streams when possible (no re-encoding)
+                ydl_opts['postprocessor_args'] = {
+                    'merger': ['-c', 'copy', '-movflags', '+faststart'],
+                }
         
         # Subtitle options
         if subtitle:
