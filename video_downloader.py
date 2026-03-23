@@ -13,6 +13,20 @@ import glob
 from pathlib import Path
 
 
+def _setup_bundled_paths():
+    """When running as a PyInstaller bundle, add the bundle dir to PATH
+    so yt-dlp can find deno (JS runtime) and ffmpeg."""
+    if getattr(sys, 'frozen', False):
+        bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        exe_dir = os.path.dirname(sys.executable)
+        # Prepend both dirs to PATH so yt-dlp subprocess calls find deno/ffmpeg
+        for d in [bundle_dir, exe_dir]:
+            if d not in os.environ.get('PATH', ''):
+                os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
+
+_setup_bundled_paths()
+
+
 def _find_ffmpeg():
     """Find the FFmpeg binary path. Returns the path string or None if not found."""
     # When running as a PyInstaller bundle, check the extraction directory first

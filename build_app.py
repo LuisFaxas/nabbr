@@ -69,6 +69,15 @@ def build_executable():
     if ffmpeg_exists:
         cmd.append(f'--add-data={ffmpeg_name}{path_sep}.')
 
+    # Add deno (JS runtime required by yt-dlp for YouTube) if available
+    deno_name = 'deno' if is_mac else 'deno.exe'
+    deno_exists = os.path.exists(deno_name)
+    if deno_exists:
+        print(f"Found {deno_name} — will bundle it (JS runtime for yt-dlp YouTube support).")
+        cmd.append(f'--add-data={deno_name}{path_sep}.')
+    else:
+        print(f"Warning: {deno_name} not found. YouTube downloads may fail without a JS runtime.")
+
     # Hidden imports — PyQt5, yt-dlp, and curl_cffi (native C extensions need explicit listing)
     cmd.extend([
         '--hidden-import=PyQt5',
