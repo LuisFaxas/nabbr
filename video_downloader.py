@@ -426,7 +426,20 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
                 existing_files.update(glob.glob(f"{output_path}/{ext}"))
         
         # Download with yt-dlp
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Try creating the downloader — if impersonation fails (common in
+        # PyInstaller bundles where curl_cffi native libs may not work fully),
+        # retry without it.
+        try:
+            ydl_ctx = yt_dlp.YoutubeDL(ydl_opts)
+        except (AssertionError, Exception) as e:
+            if 'impersonate' in ydl_opts:
+                print(f"⚠️ Impersonation failed ({e}), retrying without it...")
+                del ydl_opts['impersonate']
+                ydl_ctx = yt_dlp.YoutubeDL(ydl_opts)
+            else:
+                raise
+
+        with ydl_ctx as ydl:
             try:
                 # Extract info first
                 print("🔍 Extracting video information...")
