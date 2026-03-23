@@ -65,6 +65,12 @@ def build_executable():
     if icon_path:
         cmd.append(f'--icon={icon_path}')
 
+    # Bundle icon files so the running app can load them at runtime
+    for icon_file in ['app_icon.ico', 'app_icon.png']:
+        if os.path.exists(icon_file):
+            cmd.append(f'--add-data={icon_file}{path_sep}.')
+            print(f"Bundling {icon_file} for runtime icon display.")
+
     # Add ffmpeg if available
     if ffmpeg_exists:
         cmd.append(f'--add-data={ffmpeg_name}{path_sep}.')

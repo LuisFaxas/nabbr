@@ -12,7 +12,26 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTabWidget, QGroupBox, QMessageBox, QListWidget,
                              QMenu, QAction)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QIcon
 import video_downloader
+
+
+def _get_icon_path():
+    """Find the app icon, checking PyInstaller bundle dir first."""
+    if getattr(sys, 'frozen', False):
+        bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        for d in [bundle_dir, os.path.dirname(sys.executable)]:
+            for name in ['app_icon.ico', 'app_icon.png']:
+                p = os.path.join(d, name)
+                if os.path.exists(p):
+                    return p
+    # Running from source
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    for name in ['app_icon.ico', 'app_icon.png']:
+        p = os.path.join(script_dir, name)
+        if os.path.exists(p):
+            return p
+    return None
 import glob
 from pathlib import Path
 from settings_manager import SettingsManager
@@ -179,8 +198,13 @@ class MainWindow(QMainWindow):
         # Initialize settings manager
         self.settings = SettingsManager()
         
-        self.setWindowTitle("📹 Nabbr - Ready")
-        
+        self.setWindowTitle("Nabbr - Ready")
+
+        # Set window icon (title bar, taskbar, alt-tab)
+        icon_path = _get_icon_path()
+        if icon_path:
+            self.setWindowIcon(QIcon(icon_path))
+
         # Debounce timer for saving window size on resize
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
@@ -754,7 +778,7 @@ Features:
             self.convert_check.setChecked(True)   # Enable FFmpeg conversion
             
             # Update window title to show current mode
-            self.setWindowTitle("📹 Nabbr - Ready")
+            self.setWindowTitle("Nabbr - Ready")
     
     def on_audio_type_changed(self, state):
         """Handle audio type selection - Make everything automatic for audio downloads"""
@@ -789,7 +813,7 @@ Features:
                 # Restore video defaults
                 self.premiere_check.setChecked(True)
                 self.convert_check.setChecked(True)
-                self.setWindowTitle("📹 Nabbr - Ready")
+                self.setWindowTitle("Nabbr - Ready")
     
     def update_convert_state(self, state):
         # If premiere or davinci is checked, also check convert
@@ -1266,7 +1290,21 @@ Features:
 
 
 if __name__ == "__main__":
+    # On Windows, set AppUserModelID so the taskbar shows our icon instead of Python's
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('nabbr.nabbr.1')
+        except Exception:
+            pass
+
     app = QApplication(sys.argv)
+
+    # Set app-level icon (taskbar, alt-tab, all dialogs)
+    icon_path = _get_icon_path()
+    if icon_path:
+        app.setWindowIcon(QIcon(icon_path))
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
