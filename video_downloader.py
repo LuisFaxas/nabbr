@@ -508,8 +508,10 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
                 return 0
                 
             except Exception as e:
-                error_msg = str(e)
+                import traceback
+                error_msg = str(e) or repr(e)
                 print(f"❌ Download error: {error_msg}")
+                print(f"❌ Download traceback:\n{traceback.format_exc()}")
                 
                 # Try fallback method for DNS issues or player response failures
                 if ('Failed to resolve' in error_msg or 'getaddrinfo failed' in error_msg or 
@@ -606,11 +608,18 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
                 
                 return 1
                 
-    except ImportError:
-        print("❌ Error: yt-dlp is not installed. Please install it with: pip install yt-dlp")
+    except ImportError as e:
+        print(f"❌ Error: yt-dlp is not installed or failed to import: {e}")
+        return 1
+    except SystemExit as e:
+        import traceback
+        print(f"❌ yt-dlp called sys.exit({e.code})")
+        print(f"❌ Traceback:\n{traceback.format_exc()}")
         return 1
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
+        import traceback
+        print(f"❌ Unexpected error: {repr(e)}")
+        print(f"❌ Traceback:\n{traceback.format_exc()}")
         return 1
 
 def main():
