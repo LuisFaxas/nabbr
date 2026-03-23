@@ -33,8 +33,12 @@ class ProgressMonitor:
             if self.current_phase == "download":
                 if progress_dict.get('status') == 'downloading':
                     # Calculate download progress
-                    if 'total_bytes' in progress_dict and progress_dict['total_bytes'] > 0:
-                        percent = int(progress_dict['downloaded_bytes'] / progress_dict['total_bytes'] * 100)
+                    total_bytes = progress_dict.get('total_bytes') or progress_dict.get('total_bytes_estimate')
+                    downloaded = progress_dict.get('downloaded_bytes', 0)
+                    if total_bytes and total_bytes > 0:
+                        percent = int(downloaded / total_bytes * 100)
+                        if percent >= 100:
+                            percent = 99
                         self.progress_callback.emit(percent)
                         
                         # Update status with download speed and ETA
@@ -44,19 +48,15 @@ class ProgressMonitor:
                             status = f"Downloading: {percent}% at {speed:.2f} MB/s, ETA: {eta} seconds"
                             self.status_callback.emit(status)
                     # Handle case where total_bytes is not available
-                    elif 'downloaded_bytes' in progress_dict:
-                        self.status_callback.emit(f"Downloading: {progress_dict['downloaded_bytes'] / 1024 / 1024:.1f} MB downloaded")
+                    elif downloaded:
+                        self.status_callback.emit(f"Downloading: {downloaded / 1024 / 1024:.1f} MB downloaded")
                         # Use indeterminate progress
                         self.progress_callback.emit(-1)
                         
                 elif progress_dict.get('status') == 'finished':
-                    self.status_callback.emit("Download finished, processing file...")
-                    self.current_phase = "processing"
-                    self.progress_callback.emit(50)  # Set to 50% for processing phase
-            
-            elif self.current_phase == "processing" and progress_dict.get('status') == 'finished':
-                self.progress_callback.emit(90)  # Almost done
-                self.status_callback.emit("Processing complete, finalizing...")
+                    self.status_callback.emit("Download finished.")
+                    self.current_phase = "done"
+                    self.progress_callback.emit(100)
         except Exception as e:
             # Don't let errors in progress reporting crash the download
             self.status_callback.emit(f"Progress update error: {str(e)}")
@@ -1164,10 +1164,11 @@ Features:
     def update_progress(self, value):
         # Handle indeterminate progress (-1)
         if value == -1:
-            # For indeterminate progress, we could animate the progress bar
-            # But for now, just set it to a mid-range value
-            self.progress_bar.setValue(50)
+            if self.progress_bar.maximum() != 0:
+                self.progress_bar.setRange(0, 0)
         else:
+            if self.progress_bar.maximum() == 0:
+                self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
     
     def download_finished(self, success, message):

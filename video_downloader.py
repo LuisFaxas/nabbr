@@ -15,6 +15,18 @@ from pathlib import Path
 
 def _find_ffmpeg():
     """Find the FFmpeg binary path. Returns the path string or None if not found."""
+    # When running as a PyInstaller bundle, check the extraction directory first
+    if getattr(sys, 'frozen', False):
+        bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+        bundled = os.path.join(bundle_dir, 'ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg')
+        if os.path.exists(bundled):
+            return bundled
+        # Also check next to the .exe itself (user may place ffmpeg beside Nabbr.exe)
+        exe_dir = os.path.dirname(sys.executable)
+        beside_exe = os.path.join(exe_dir, 'ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg')
+        if os.path.exists(beside_exe):
+            return beside_exe
+
     found = shutil.which("ffmpeg")
     if found:
         return found
@@ -208,6 +220,13 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
     
     try:
         import yt_dlp
+
+        supports_impersonate = False
+        try:
+            import curl_cffi  # Optional dependency for impersonation
+            supports_impersonate = True
+        except Exception:
+            supports_impersonate = False
         
         # Set up yt-dlp options with minimal, proven configuration
         ydl_opts = {
@@ -221,9 +240,10 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
             # Retry settings for reliability
             'retries': 3,
             'fragment_retries': 3,
-            # Impersonate a browser to bypass Cloudflare anti-bot challenges
-            'impersonate': 'chrome',
         }
+        if supports_impersonate:
+            # Impersonate a browser to bypass Cloudflare anti-bot challenges
+            ydl_opts['impersonate'] = 'chrome'
         
         # Set output path
         if output_path:

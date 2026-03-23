@@ -15,6 +15,7 @@ def build_executable():
     """Build a standalone executable for Nabbr."""
 
     is_mac = sys.platform == 'darwin'
+    is_win = sys.platform == 'win32'
     path_sep = ':' if is_mac else ';'
     app_name = 'Nabbr.app' if is_mac else 'Nabbr.exe'
 
@@ -40,13 +41,16 @@ def build_executable():
     # Check if ffmpeg exists in the project directory
     ffmpeg_name = 'ffmpeg' if is_mac else 'ffmpeg.exe'
     ffmpeg_exists = os.path.exists(ffmpeg_name)
-    if not ffmpeg_exists:
+    if ffmpeg_exists:
+        print(f"Found {ffmpeg_name} — will bundle it into the executable.")
+    else:
         print(f"Warning: {ffmpeg_name} not found in the project directory.")
-        print("The application will still build, but users will need to install FFmpeg separately.")
-        if is_mac:
-            print("Install via Homebrew: brew install ffmpeg")
+        print("The app will still work for basic downloads, but editor conversions need FFmpeg.")
+        if is_win:
+            print("To bundle FFmpeg: download ffmpeg.exe and place it in this directory before building.")
+            print("Or users can place ffmpeg.exe next to Nabbr.exe after building.")
         else:
-            print("For full functionality, download FFmpeg and place it in the same directory as the executable.")
+            print("Install via Homebrew: brew install ffmpeg")
 
     # Build the PyInstaller command
     cmd = [
@@ -65,7 +69,7 @@ def build_executable():
     if ffmpeg_exists:
         cmd.append(f'--add-data={ffmpeg_name}{path_sep}.')
 
-    # Add hidden imports
+    # Hidden imports — PyQt5, yt-dlp, and curl_cffi (native C extensions need explicit listing)
     cmd.extend([
         '--hidden-import=PyQt5',
         '--hidden-import=PyQt5.QtCore',
@@ -73,6 +77,14 @@ def build_executable():
         '--hidden-import=PyQt5.QtWidgets',
         '--hidden-import=yt_dlp',
         '--hidden-import=curl_cffi',
+        '--hidden-import=curl_cffi.requests',
+        '--hidden-import=curl_cffi._wrapper',
+        '--hidden-import=certifi',
+    ])
+
+    # Collect all curl_cffi data files (native .dll/.so libraries)
+    cmd.extend([
+        '--collect-all=curl_cffi',
     ])
 
     # Add the main script
@@ -84,69 +96,43 @@ def build_executable():
     subprocess.run(cmd, check=True)
 
     print("\nBuild completed!")
-    print(f"Created: {os.path.abspath('dist/' + app_name)}")
-
-    # Copy additional files to the dist directory
-    print("\nCopying additional files to distribution directory...")
-
-    # Create a simple readme for users
-    with open('dist/README.txt', 'w') as f:
-        f.write(f"""Nabbr
-=====
-
-Download videos and audio from YouTube, Instagram, TikTok, and 1000+ sites.
-
-Features:
-- Download videos in various qualities
-- Convert for Adobe Premiere Pro and DaVinci Resolve
-- Extract audio as MP3
-- Batch download multiple videos
-
-To use:
-1. Launch {app_name}
-2. Enter a video URL
-3. Select your desired options
-4. Click Download
-
-For batch downloads:
-1. Check the "Batch Mode" checkbox
-2. Add multiple URLs to the queue
-3. Click "Download All"
-
-Note: This application requires an internet connection.
-""")
+    print(f"Created: {os.path.abspath(os.path.join('dist', app_name))}")
 
     # If ffmpeg wasn't included, create a note about it
     if not ffmpeg_exists:
-        with open('dist/FFMPEG_NOTE.txt', 'w') as f:
+        note_path = os.path.join('dist', 'FFMPEG_NOTE.txt')
+        with open(note_path, 'w') as f:
             if is_mac:
-                f.write("""IMPORTANT: FFmpeg Required for Full Functionality
-===========================================
+                f.write("""FFmpeg Required for Editor Conversions
+======================================
 
-For video conversion features to work properly, you need to install FFmpeg:
+For Premiere Pro / DaVinci Resolve conversion features, install FFmpeg:
 
-1. Install via Homebrew: brew install ffmpeg
-   Or download from: https://ffmpeg.org/download.html
+  brew install ffmpeg
 
-Without FFmpeg, you can still download videos, but conversion for
-Adobe Premiere Pro and DaVinci Resolve will not work.
+Basic video/audio downloads work without FFmpeg.
 """)
             else:
-                f.write("""IMPORTANT: FFmpeg Required for Full Functionality
-===========================================
+                f.write("""FFmpeg Required for Editor Conversions
+======================================
 
-For video conversion features to work properly, you need to install FFmpeg:
+For Premiere Pro / DaVinci Resolve conversion features:
 
-1. Download FFmpeg from: https://ffmpeg.org/download.html
-2. Extract the archive and locate ffmpeg.exe
-3. Place ffmpeg.exe in the same directory as Nabbr.exe
+  1. Download ffmpeg.exe from https://ffmpeg.org/download.html
+     (or https://github.com/BtbN/FFmpeg-Builds/releases — get the
+     "ffmpeg-master-latest-win64-gpl.zip", extract, find ffmpeg.exe in the bin/ folder)
+  2. Place ffmpeg.exe in the SAME FOLDER as Nabbr.exe
 
-Without FFmpeg, you can still download videos, but conversion for
-Adobe Premiere Pro and DaVinci Resolve will not work.
+Basic video/audio downloads work without FFmpeg.
 """)
 
     print("\nDistribution package is ready!")
     print(f"You can find it at: {os.path.abspath('dist')}")
+
+    if ffmpeg_exists:
+        print(f"\n  Portable package: just copy dist/{app_name} anywhere and double-click to run!")
+    else:
+        print(f"\n  To make fully portable: place ffmpeg.exe next to dist/{app_name}")
 
 if __name__ == "__main__":
     build_executable()
