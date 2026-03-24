@@ -37,6 +37,12 @@ def _find_deno():
     if system_deno:
         candidates.append(system_deno)
 
+    # Homebrew fallback paths for macOS
+    if sys.platform == 'darwin':
+        for p in ['/opt/homebrew/bin/deno', '/usr/local/bin/deno']:
+            if os.path.exists(p) and p not in candidates:
+                candidates.append(p)
+
     # Verify each candidate can actually run (Defender may block bundled exe)
     for path in candidates:
         try:

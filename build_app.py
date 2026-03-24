@@ -141,10 +141,28 @@ For Premiere Pro / DaVinci Resolve conversion features:
 Basic video/audio downloads work without FFmpeg.
 """)
 
+    # On macOS, create a DMG for easy distribution
+    if is_mac:
+        app_path = os.path.join('dist', app_name)
+        dmg_path = os.path.join('dist', 'Nabbr.dmg')
+        if os.path.exists(app_path):
+            print("\nCreating DMG installer...")
+            try:
+                subprocess.run([
+                    'hdiutil', 'create', '-volname', 'Nabbr',
+                    '-srcfolder', app_path, '-ov', '-format', 'UDZO', dmg_path
+                ], check=True)
+                print(f"DMG created: {os.path.abspath(dmg_path)}")
+            except Exception as e:
+                print(f"Warning: Could not create DMG: {e}")
+                print("The .app bundle is still available in dist/")
+
     print("\nDistribution package is ready!")
     print(f"You can find it at: {os.path.abspath('dist')}")
 
-    if ffmpeg_exists:
+    if is_mac:
+        print(f"\n  Install: open dist/Nabbr.dmg and drag Nabbr to Applications")
+    elif ffmpeg_exists:
         print(f"\n  Portable package: just copy dist/{app_name} anywhere and double-click to run!")
     else:
         print(f"\n  To make fully portable: place ffmpeg.exe next to dist/{app_name}")

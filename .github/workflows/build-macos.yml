@@ -1,0 +1,62 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14  # Apple Silicon (M1+)
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Deno (JS runtime required by yt-dlp for YouTube)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller Pillow
+
+      - name: Install and bundle FFmpeg
+        run: |
+          brew install ffmpeg
+          cp $(which ffmpeg) ffmpeg
+          ./ffmpeg -version
+
+      - name: Bundle Deno runtime
+        run: |
+          cp $(which deno) deno
+          ./deno --version
+
+      - name: Generate macOS icon (.icns)
+        run: |
+          python -c "
+          from PIL import Image
+          img = Image.open('app_icon.png').convert('RGBA')
+          img.save('app_icon.icns', format='ICNS')
+          print('Generated app_icon.icns')
+          "
+
+      - name: Build app
+        run: python build_app.py
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "Nabbr" -srcfolder dist/Nabbr.app \
+            -ov -format UDZO dist/Nabbr.dmg
+
+      - name: Upload Nabbr.dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nabbr-macOS
+          path: dist/Nabbr.dmg
