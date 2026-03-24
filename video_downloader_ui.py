@@ -113,6 +113,16 @@ class ProgressMonitor:
                     self.status_callback.emit("Download finished.")
                     self.current_phase = "done"
                     self.progress_callback.emit(100)
+
+                elif progress_dict.get('status') == 'converting':
+                    self.current_phase = "converting"
+                    self.progress_callback.emit(-1)  # Pulsing animation
+                    self.status_callback.emit("Converting for editor compatibility...")
+
+                elif progress_dict.get('status') == 'convert_done':
+                    self.current_phase = "done"
+                    self.progress_callback.emit(100)
+                    self.status_callback.emit("Conversion complete!")
         except Exception as e:
             # Don't let errors in progress reporting crash the download
             self.status_callback.emit(f"Progress update error: {str(e)}")

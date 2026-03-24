@@ -483,35 +483,41 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
                 
                 # Post-processing conversion if requested
                 if direct_convert and output_path and download_success and new_files:
-                    print("🔄 Starting post-download conversion...")
-                    
+                    print("Starting post-download conversion...")
+
+                    # Signal UI: conversion starting
+                    if progress_hook:
+                        progress_hook({'status': 'converting'})
+
                     # Use the newly downloaded files for conversion
                     files_to_convert = []
                     if audio_only:
-                        # For audio, find audio files in new_files
                         audio_extensions = ['.mp3', '.m4a', '.aac', '.opus', '.wav']
                         files_to_convert = [f for f in new_files if any(f.lower().endswith(ext) for ext in audio_extensions)]
                     else:
-                        # For video, find video files in new_files
                         video_extensions = ['.mp4', '.mkv', '.webm', '.mov', '.avi', '.flv']
                         files_to_convert = [f for f in new_files if any(f.lower().endswith(ext) for ext in video_extensions)]
-                    
+
+                    converted_file = None
                     if files_to_convert:
-                        # Use the first suitable file for conversion
                         latest_file = files_to_convert[0]
-                        
+
                         if davinci:
-                            print("🎬 Converting for DaVinci Resolve compatibility...")
+                            print("Converting for DaVinci Resolve compatibility...")
                             converted_file = convert_for_davinci(latest_file, output_path)
                             if converted_file:
-                                print(f"✅ DaVinci-compatible file created: {os.path.basename(converted_file)}")
+                                print(f"DaVinci-compatible file created: {os.path.basename(converted_file)}")
                         elif premiere:
-                            print("🎬 Converting for Premiere Pro compatibility...")
+                            print("Converting for Premiere Pro compatibility...")
                             converted_file = convert_for_premiere(latest_file, output_path)
                             if converted_file:
-                                print(f"✅ Premiere-compatible file created: {os.path.basename(converted_file)}")
+                                print(f"Premiere-compatible file created: {os.path.basename(converted_file)}")
                     else:
-                        print("⚠️ Warning: Could not find downloaded file for conversion")
+                        print("Warning: Could not find downloaded file for conversion")
+
+                    # Signal UI: conversion done
+                    if progress_hook:
+                        progress_hook({'status': 'convert_done'})
                 
                 return 0
                 
