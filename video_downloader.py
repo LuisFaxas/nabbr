@@ -19,19 +19,6 @@ if sys.platform == 'win32':
     _subprocess_flags['creationflags'] = subprocess.CREATE_NO_WINDOW
 
 
-def _setup_bundled_paths():
-    """When running as a PyInstaller bundle, add the bundle dir to PATH
-    so yt-dlp can find deno (JS runtime) and ffmpeg."""
-    if getattr(sys, 'frozen', False):
-        bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-        exe_dir = os.path.dirname(sys.executable)
-        # Prepend both dirs to PATH so subprocess calls find bundled binaries
-        for d in [bundle_dir, exe_dir]:
-            if d not in os.environ.get('PATH', ''):
-                os.environ['PATH'] = d + os.pathsep + os.environ.get('PATH', '')
-
-_setup_bundled_paths()
-
 
 def _find_deno():
     """Find the deno binary path (JS runtime required by yt-dlp for YouTube).
@@ -143,28 +130,38 @@ def convert_for_premiere(input_file, output_dir):
         ]
         
         print(f"Converting video for Premiere Pro compatibility...")
-        print(f"Running command: {' '.join(command)}")
-        
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **_subprocess_flags)
-        
+
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, timeout=3600, **_subprocess_flags)
+        except subprocess.TimeoutExpired:
+            print("FFmpeg conversion timed out after 1 hour")
+            if os.path.exists(output_file):
+                os.remove(output_file)
+            return None
+
         if result.returncode == 0:
             print(f"Conversion completed successfully!")
-            
+
             # Replace original file with Premiere-optimized version (safe pattern)
+            backup_file = input_file + ".bak"
             try:
-                backup_file = input_file + ".bak"
                 os.rename(input_file, backup_file)
                 os.rename(output_file, final_output_file)
-                os.remove(backup_file)
-                print(f"📁 Premiere-optimized file saved as: {os.path.basename(final_output_file)}")
+                print(f"Premiere-optimized file saved as: {os.path.basename(final_output_file)}")
                 return final_output_file
             except Exception as e:
-                print(f"⚠️ Warning: Could not replace original file: {e}")
-                # Restore backup if rename failed
+                print(f"Warning: Could not replace original file: {e}")
                 if os.path.exists(backup_file) and not os.path.exists(input_file):
                     os.rename(backup_file, input_file)
-                print(f"📁 Premiere file saved as: {os.path.basename(output_file)}")
-                return output_file
+                return output_file if os.path.exists(output_file) else None
+            finally:
+                # Clean up orphaned backup
+                if os.path.exists(backup_file):
+                    try:
+                        os.remove(backup_file)
+                    except OSError:
+                        pass
         else:
             print(f"Error during conversion: {result.stderr}")
             return None
@@ -212,28 +209,38 @@ def convert_for_davinci(input_file, output_dir):
         ]
         
         print(f"Converting video for DaVinci Resolve compatibility...")
-        print(f"Running command: {' '.join(command)}")
-        
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **_subprocess_flags)
-        
+
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, timeout=3600, **_subprocess_flags)
+        except subprocess.TimeoutExpired:
+            print("FFmpeg conversion timed out after 1 hour")
+            if os.path.exists(output_file):
+                os.remove(output_file)
+            return None
+
         if result.returncode == 0:
             print(f"DaVinci conversion completed successfully!")
-            
+
             # Replace original file with DaVinci-optimized version (safe pattern)
+            backup_file = input_file + ".bak"
             try:
-                backup_file = input_file + ".bak"
                 os.rename(input_file, backup_file)
                 os.rename(output_file, final_output_file)
-                os.remove(backup_file)
-                print(f"📁 DaVinci-optimized file saved as: {os.path.basename(final_output_file)}")
+                print(f"DaVinci-optimized file saved as: {os.path.basename(final_output_file)}")
                 return final_output_file
             except Exception as e:
-                print(f"⚠️ Warning: Could not replace original file: {e}")
-                # Restore backup if rename failed
+                print(f"Warning: Could not replace original file: {e}")
                 if os.path.exists(backup_file) and not os.path.exists(input_file):
                     os.rename(backup_file, input_file)
-                print(f"📁 DaVinci file saved as: {os.path.basename(output_file)}")
-                return output_file
+                return output_file if os.path.exists(output_file) else None
+            finally:
+                # Clean up orphaned backup
+                if os.path.exists(backup_file):
+                    try:
+                        os.remove(backup_file)
+                    except OSError:
+                        pass
         else:
             print(f"Error during DaVinci conversion: {result.stderr}")
             return None
@@ -242,7 +249,7 @@ def convert_for_davinci(input_file, output_dir):
         return None
 
 
-def download_video(url, output_path=None, video_format=None, audio_only=False, subtitle=False, quality=None, mp4=False, premiere=False, davinci=False, direct_convert=False, audio_quality="192", progress_hook=None):
+def download_video(url, output_path=None, video_format=None, audio_only=False, subtitle=False, quality=None, mp4=False, premiere=False, davinci=False, direct_convert=False, audio_quality="192", progress_hook=None, cookie_browser=None, remote_components=True):
     """
     Download video from URL with enhanced options and error handling
 
@@ -320,7 +327,17 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
             ffmpeg_dir = os.path.dirname(ffmpeg_path)
             ydl_opts['ffmpeg_location'] = ffmpeg_dir
             print(f"Using FFmpeg: {ffmpeg_path}")
-        
+
+        # Browser cookies — enables age-restricted and bot-detected video downloads
+        if cookie_browser and cookie_browser.lower() != 'none':
+            ydl_opts['cookiesfrombrowser'] = (cookie_browser.lower(), None, None, None)
+            print(f"Browser cookies enabled: {cookie_browser}")
+
+        # Remote challenge solvers — needed for YouTube JS challenges
+        if remote_components:
+            ydl_opts['remote_components'] = ['ejs:github']
+            print("Remote challenge solvers enabled (ejs:github)")
+
         # Set output path
         if output_path:
             output_dir = Path(output_path)
@@ -575,14 +592,12 @@ def download_video(url, output_path=None, video_format=None, audio_only=False, s
                 
                 # Handle common errors with suggested solutions
                 if 'age-restricted' in error_msg.lower() or 'sign in to confirm' in error_msg.lower():
-                    print("💡 AGE-RESTRICTED VIDEO DETECTED:")
-                    print("   This video requires YouTube authentication to download.")
-                    print("   ℹ️ The DNS/API fix is working - this is a different issue.")
-                    print("   🔒 To download age-restricted videos, you need to:")
-                    print("   1. Export your YouTube cookies from your browser")
-                    print("   2. Use the --cookies option in yt-dlp")
-                    print("   3. Or try a different, non-age-restricted video to test")
-                    print("   📝 Try this test video: https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+                    if 'bot' in error_msg.lower():
+                        print("BOT DETECTION: YouTube thinks this is automated.")
+                        print("   Fix: Go to the Advanced tab and select your browser under 'Browser Cookies'.")
+                    else:
+                        print("AGE-RESTRICTED VIDEO: This video requires authentication.")
+                        print("   Fix: Go to the Advanced tab and select your browser under 'Browser Cookies'.")
                 elif 'private video' in error_msg.lower():
                     print("💡 Suggestion: This video is private. Check if you have access or if the URL is correct.")
                 elif 'not available' in error_msg.lower():

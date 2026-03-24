@@ -5,10 +5,13 @@ Handles saving and loading user preferences including last used directories.
 """
 
 import os
+import sys
 import json
+import stat
 import time
 import copy
 from pathlib import Path
+from urllib.parse import urlparse
 
 class SettingsManager:
     def __init__(self):
@@ -36,6 +39,8 @@ class SettingsManager:
             "auto_update_yt_dlp": True,
             "download_history": [],
             "max_download_history": 20,
+            "cookie_browser": "none",
+            "enable_remote_components": True,
         }
         
         # Load existing settings
@@ -74,7 +79,11 @@ class SettingsManager:
             
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2, ensure_ascii=False)
-            
+
+            # Restrict file permissions on Unix (owner read/write only)
+            if sys.platform != 'win32':
+                os.chmod(self.settings_file, stat.S_IRUSR | stat.S_IWUSR)
+
             return True
         except Exception as e:
             print(f"Error saving settings: {e}")
@@ -132,19 +141,25 @@ class SettingsManager:
         return recent
     
     def add_download_history(self, url, title, output_path):
-        """Add a download to the history"""
+        """Add a download to the history (stores domain only, not full URL for privacy)"""
         history = self.settings.get("download_history", [])
-        
+
+        # Extract domain only — never store full URLs
+        try:
+            domain = urlparse(url).netloc or "unknown"
+        except Exception:
+            domain = "unknown"
+
         # Create history entry
         entry = {
-            "url": url,
+            "domain": domain,
             "title": title,
-            "output_path": output_path,
+            "directory": os.path.basename(output_path) if output_path else "",
             "timestamp": str(time.time())
         }
-        
-        # Remove duplicate URLs
-        history = [h for h in history if h.get("url") != url]
+
+        # Remove duplicate titles from same domain
+        history = [h for h in history if not (h.get("domain") == domain and h.get("title") == title)]
         
         # Add to beginning
         history.insert(0, entry)
@@ -202,13 +217,24 @@ class SettingsManager:
             return False
     
     def import_settings(self, file_path):
-        """Import settings from a file"""
+        """Import settings from a file (validates against known keys and types)"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 imported_settings = json.load(f)
-            
-            # Merge with current settings
-            self.settings.update(imported_settings)
+
+            if not isinstance(imported_settings, dict):
+                print("Error importing settings: file does not contain a JSON object")
+                return False
+
+            # Only accept known keys with matching types
+            for key, value in imported_settings.items():
+                if key not in self.default_settings:
+                    continue  # skip unknown keys
+                expected_type = type(self.default_settings[key])
+                if not isinstance(value, expected_type):
+                    continue  # skip type mismatches
+                self.settings[key] = value
+
             self.save_settings()
             return True
         except Exception as e:

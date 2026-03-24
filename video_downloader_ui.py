@@ -6,33 +6,35 @@ A desktop video and audio downloader.
 
 import sys
 import os
+import re
 import logging
+import threading
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-# --- Logging setup: capture ALL output to a log file ---
+# --- Logging setup: capture ALL output to a rotating log file ---
 # In windowed mode (PyInstaller --windowed), stdout/stderr go nowhere.
 # This redirects everything to a log file so errors are never lost.
 _log_dir = Path.home() / ".nabbr"
 _log_dir.mkdir(exist_ok=True)
 _log_file = _log_dir / "nabbr.log"
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(str(_log_file), encoding="utf-8"),
-    ],
-)
+_handler = RotatingFileHandler(str(_log_file), maxBytes=5*1024*1024, backupCount=3, encoding="utf-8")
+_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+logging.basicConfig(level=logging.DEBUG, handlers=[_handler])
 logger = logging.getLogger("nabbr")
 
 # Redirect stdout/stderr to log file so print() calls from yt-dlp/video_downloader are captured
+_URL_PATTERN = re.compile(r'https?://\S+')
+
 class _LogWriter:
     def __init__(self, log_level):
         self._level = log_level
-        self._buf = ""
     def write(self, msg):
         if msg and msg.strip():
-            for line in msg.rstrip().splitlines():
+            # Redact URLs from logs for privacy
+            redacted = _URL_PATTERN.sub('[URL]', msg)
+            for line in redacted.rstrip().splitlines():
                 logging.log(self._level, line)
     def flush(self):
         pass
@@ -82,7 +84,7 @@ class ProgressMonitor:
         # This function will be called by yt-dlp to report progress
         try:
             # Check if cancellation was requested
-            if self._thread and self._thread._stop_requested:
+            if self._thread and self._thread._stop_event.is_set():
                 raise DownloadCancelled("Download cancelled by user")
             if self.current_phase == "download":
                 if progress_dict.get('status') == 'downloading':
@@ -132,12 +134,12 @@ class DownloaderThread(QThread):
         self.url = url
         self.output_path = output_path
         self.options = options
-        self._stop_requested = False
+        self._stop_event = threading.Event()
         self.monitor = ProgressMonitor(self.progress, self.status, self)
 
     def request_stop(self):
         """Request graceful stop. The progress hook will raise DownloadCancelled."""
-        self._stop_requested = True
+        self._stop_event.set()
 
     def _get_recent_error(self):
         """Read the last few lines of the log file to find the actual error."""
@@ -181,6 +183,8 @@ class DownloaderThread(QThread):
                 direct_convert=self.options.get('convert', False),
                 audio_quality=self.options.get('audio_quality', '192'),
                 progress_hook=self.monitor.update_progress,
+                cookie_browser=self.options.get('cookie_browser'),
+                remote_components=self.options.get('remote_components', True),
             )
             
             if exit_code == 0:
@@ -549,7 +553,41 @@ class MainWindow(QMainWindow):
         note_label = QLabel("Note: Format uses yt-dlp format strings. Leave empty to use default.")
         note_label.setWordWrap(True)
         advanced_layout.addWidget(note_label)
-        
+
+        # --- Browser Cookies (for age-restricted / bot-detected videos) ---
+        cookie_group = QGroupBox("Browser Cookies")
+        cookie_layout = QVBoxLayout()
+        cookie_select_layout = QHBoxLayout()
+        cookie_select_layout.addWidget(QLabel("Browser:"))
+        self.cookie_browser_combo = QComboBox()
+        self.cookie_browser_combo.addItems(["None", "Chrome", "Edge", "Firefox", "Brave"])
+        # Load saved value
+        saved_browser = self.settings.get("cookie_browser", "none")
+        idx = self.cookie_browser_combo.findText(saved_browser.capitalize())
+        if idx >= 0:
+            self.cookie_browser_combo.setCurrentIndex(idx)
+        self.cookie_browser_combo.currentTextChanged.connect(
+            lambda text: self.settings.set("cookie_browser", text.lower()))
+        cookie_select_layout.addWidget(self.cookie_browser_combo)
+        cookie_layout.addLayout(cookie_select_layout)
+        cookie_info = QLabel("Uses your browser's cookies for age-restricted or bot-detected videos. "
+                             "Cookies are read in-memory only and never saved by Nabbr.")
+        cookie_info.setWordWrap(True)
+        cookie_info.setStyleSheet("color: gray; font-size: 11px;")
+        cookie_layout.addWidget(cookie_info)
+        cookie_group.setLayout(cookie_layout)
+        advanced_layout.addWidget(cookie_group)
+
+        # --- Remote Challenge Solvers ---
+        self.remote_components_check = QCheckBox("Allow remote challenge solvers (recommended for YouTube)")
+        self.remote_components_check.setChecked(self.settings.get("enable_remote_components", True))
+        self.remote_components_check.setToolTip(
+            "Lets yt-dlp download small JS scripts to solve YouTube challenges.\n"
+            "These run in a sandboxed Deno process with no network access.")
+        self.remote_components_check.toggled.connect(
+            lambda checked: self.settings.set("enable_remote_components", checked))
+        advanced_layout.addWidget(self.remote_components_check)
+
         advanced_tab.setLayout(advanced_layout)
         tabs.addTab(advanced_tab, "Advanced")
         
@@ -729,12 +767,13 @@ class MainWindow(QMainWindow):
         history_text = "Recent Downloads:\n\n"
         for i, entry in enumerate(history[:10], 1):  # Show last 10
             title = entry.get('title', 'Unknown')
-            url = entry.get('url', 'Unknown')
+            # Support both old format (url) and new format (domain)
+            source = entry.get('domain', entry.get('url', 'Unknown'))
             if len(title) > 50:
                 title = title[:47] + "..."
-            if len(url) > 60:
-                url = url[:57] + "..."
-            history_text += f"{i}. {title}\n   {url}\n\n"
+            if len(source) > 60:
+                source = source[:57] + "..."
+            history_text += f"{i}. {title}\n   From: {source}\n\n"
         
         dialog.setText(history_text)
         dialog.exec_()
@@ -1085,12 +1124,43 @@ Features:
 
         event.accept()
     
+    def _validate_download_path(self, path_str):
+        """Validate download path is safe and writable."""
+        resolved = os.path.realpath(os.path.abspath(path_str))
+
+        # Reject system directories
+        if sys.platform == 'win32':
+            blocked = [os.environ.get('SYSTEMROOT', r'C:\Windows').lower(),
+                       r'c:\windows', r'c:\program files', r'c:\program files (x86)']
+            if resolved.lower().rstrip(os.sep) in blocked:
+                return False, f"Cannot download to system directory: {resolved}"
+        else:
+            blocked = ['/', '/bin', '/sbin', '/usr', '/etc', '/sys', '/proc', '/dev']
+            if resolved.rstrip(os.sep) in blocked:
+                return False, f"Cannot download to system directory: {resolved}"
+
+        # Check write permissions on existing parent
+        parent = resolved
+        while not os.path.exists(parent):
+            parent = os.path.dirname(parent)
+        if not os.access(parent, os.W_OK):
+            return False, f"No write permission for: {parent}"
+
+        return True, resolved
+
     def start_download(self):
         output_path = self.output_path.text().strip()
         if not output_path:
             QMessageBox.warning(self, "Input Error", "Please select an output directory")
             return
-        
+
+        # Validate download path
+        valid, result = self._validate_download_path(output_path)
+        if not valid:
+            QMessageBox.warning(self, "Invalid Path", result)
+            return
+        output_path = result
+
         # Create output directory if it doesn't exist
         os.makedirs(output_path, exist_ok=True)
         
@@ -1161,7 +1231,11 @@ Features:
         elif platform != "Auto-detect":
             # Default platform-specific options
             options['format'] = options.get('format') or "best"
-        
+
+        # Add security/auth options from settings
+        options['cookie_browser'] = self.settings.get("cookie_browser", "none")
+        options['remote_components'] = self.settings.get("enable_remote_components", True)
+
         # Check if we're in batch mode
         if self.batch_check.isChecked():
             # Get URLs from queue
@@ -1249,7 +1323,7 @@ Features:
                 
                 # Extract title from message if possible
                 title = "Downloaded file"
-                if "completed successfully:" in message:
+                if "completed:" in message or "completed successfully:" in message:
                     try:
                         title = message.split("completed successfully:")[1].strip()
                     except (IndexError, AttributeError):
@@ -1301,7 +1375,14 @@ Features:
             elif success:
                 QMessageBox.information(self, "Success", "Download completed successfully!")
             else:
-                QMessageBox.warning(self, "Error", message)
+                msg_lower = message.lower()
+                if 'age-restricted' in msg_lower or 'sign in' in msg_lower or 'bot' in msg_lower:
+                    QMessageBox.warning(self, "Authentication Required",
+                        "This video requires browser cookies to download.\n\n"
+                        "Go to the Advanced tab and select your browser\n"
+                        "under 'Browser Cookies', then try again.")
+                else:
+                    QMessageBox.warning(self, "Error", message)
     
     def download_next_in_batch(self):
         """Download the next URL in the batch"""
